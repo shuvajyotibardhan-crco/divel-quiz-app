@@ -24,7 +24,7 @@ Email/password form wired to Firebase Auth `signInWithEmailAndPassword`. On succ
 Shared form used for both creating new quizzes and editing existing ones. Handles file upload to Firebase Storage, client-side file parsing (PDF.js for PDF, mammoth.js for DOCX, Papa Parse for CSV), and writing quiz + question documents to Firestore.
 
 ### `js/firebase.js` — Firebase Initialisation
-Initialises the Firebase app with config from inline constants (set at deploy time via GitHub Actions substitution). Exports `db`, `auth`, and `storage` singletons used by all other modules.
+Initialises the Firebase app with config from inline constants. Exports `app` and `db` only — public pages need nothing else. Admin pages and `auth-guard.js` call `getAuth(app)` / `getStorage(app)` themselves so that auth and storage SDKs are not downloaded on every public page load.
 
 ### `js/quiz-engine.js` — Quiz Logic
 Pure functions for: random question selection, answer validation (single and multi-select), stop-on-outcome evaluation (given correct count, incorrect count, threshold, total), and score calculation. No Firebase calls — fully testable in isolation.
