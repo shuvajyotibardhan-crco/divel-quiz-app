@@ -1,0 +1,13 @@
+{
+  "name": "divel-quiz-app",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Web-based quiz platform with file upload, configurable stop logic, and anonymous quiz taking",
+  "scripts": {
+    "seed": "GOOGLE_APPLICATION_CREDENTIALS=./divel-quiz-firebase-adminsdk-fbsvc-ceef52596d.json node scripts/seed.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "papaparse": "^5.4.1"
+  }
+}

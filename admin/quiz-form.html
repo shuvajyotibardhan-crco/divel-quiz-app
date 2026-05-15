@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quiz Form — Divel Quiz Admin</title>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <header class="page-header">
+    <div class="container">
+      <h1>Divel Quiz — Admin</h1>
+      <a href="/admin/index.html" class="btn btn-ghost btn-sm">← Dashboard</a>
+    </div>
+  </header>
+
+  <main class="container" style="max-width:680px">
+    <h2 class="page-title" id="pageTitle">Create Quiz</h2>
+    <div id="globalError" class="alert alert-error hidden"></div>
+    <div id="globalSuccess" class="alert alert-success hidden"></div>
+
+    <div class="card">
+      <form id="quizForm">
+        <!-- Quiz Name -->
+        <div class="form-group">
+          <label for="quizName">Quiz Name *</label>
+          <input type="text" id="quizName" maxlength="100" required placeholder="e.g. US Civics Test">
+        </div>
+
+        <!-- Answer Type -->
+        <div class="form-group">
+          <label for="answerType">Answer Type *</label>
+          <select id="answerType" required>
+            <option value="single">Single correct answer</option>
+            <option value="multi">Multiple correct answers (select all)</option>
+            <option value="mixed">Mixed (each question declares its own type)</option>
+          </select>
+          <p class="form-hint">For "mixed", each question's type is determined from the source file.</p>
+        </div>
+
+        <!-- Session size -->
+        <div class="form-group">
+          <label for="totalQuestions">Questions per session *</label>
+          <input type="number" id="totalQuestions" min="1" required placeholder="e.g. 20">
+          <p class="form-hint" id="poolHint"></p>
+        </div>
+
+        <!-- Pass threshold -->
+        <div class="form-group">
+          <label for="passThreshold">Pass threshold (correct answers to pass) *</label>
+          <input type="number" id="passThreshold" min="1" required placeholder="e.g. 12">
+        </div>
+
+        <!-- Stop behaviour -->
+        <div class="form-group">
+          <label for="stopBehaviour">Stop behaviour *</label>
+          <select id="stopBehaviour" required>
+            <option value="stop-on-outcome">Stop on outcome — end early when pass or fail is guaranteed</option>
+            <option value="run-to-end">Run to end — show all questions, then grade</option>
+          </select>
+        </div>
+
+        <!-- File upload -->
+        <div class="form-group">
+          <label>Question File (PDF, CSV, or DOCX) <span id="fileRequired">*</span></label>
+          <div class="file-drop" id="fileDrop">
+            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-8m0 0-3 3m3-3 3 3M6.75 19.5h10.5A2.25 2.25 0 0 0 19.5 17.25V6.75A2.25 2.25 0 0 0 17.25 4.5H6.75A2.25 2.25 0 0 0 4.5 6.75v10.5A2.25 2.25 0 0 0 6.75 19.5Z"/></svg>
+            <p>Click or drag & drop a file here</p>
+            <p style="font-size:0.78rem">CSV, PDF, or DOCX</p>
+            <input type="file" id="fileInput" accept=".csv,.pdf,.docx" style="display:none">
+          </div>
+          <div id="filePreview" class="file-preview hidden"></div>
+          <p id="fileError" class="error-msg hidden"></p>
+        </div>
+
+        <div style="display:flex;gap:0.75rem;justify-content:flex-end">
+          <a href="/admin/index.html" class="btn btn-ghost">Cancel</a>
+          <button type="submit" class="btn btn-primary" id="saveBtn">Save Quiz</button>
+        </div>
+      </form>
+    </div>
+  </main>
+
+  <script type="module">
+    import { auth, db, storage } from "../js/firebase.js";
+    import { requireAuth } from "../js/auth-guard.js";
+    import { parseFile } from "../js/file-parser.js";
+    import {
+      collection, doc, getDoc, setDoc, addDoc, getDocs,
+      writeBatch, serverTimestamp, deleteDoc
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import {
+      ref, uploadBytes, getDownloadURL
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+
+    await requireAuth();
+
+    const params = new URLSearchParams(location.search);
+    const editId = params.get("id");
+    const isEdit = !!editId;
+
+    if (isEdit) document.getElementById("pageTitle").textContent = "Edit Quiz";
+    document.getElementById("fileRequired").textContent = isEdit ? "(optional — upload to replace)" : "*";
+
+    // Populate form for edit mode
+    let existingQuiz = null;
+    if (isEdit) {
+      try {
+        const snap = await getDoc(doc(db, "quizzes", editId));
+        if (!snap.exists()) { alert("Quiz not found."); location.href = "/admin/index.html"; }
+        existingQuiz = snap.data();
+        document.getElementById("quizName").value = existingQuiz.name;
+        document.getElementById("answerType").value = existingQuiz.answerType;
+        document.getElementById("totalQuestions").value = existingQuiz.totalQuestions;
+        document.getElementById("passThreshold").value = existingQuiz.passThreshold;
+        document.getElementById("stopBehaviour").value = existingQuiz.stopBehaviour;
+        document.getElementById("poolHint").textContent =
+          `Current pool: ${existingQuiz.questionCount} question(s). Upload a new file to replace.`;
+      } catch (e) {
+        showError("Failed to load quiz: " + e.message);
+      }
+    }
+
+    // File drag & drop
+    const fileDrop = document.getElementById("fileDrop");
+    const fileInput = document.getElementById("fileInput");
+    const filePreview = document.getElementById("filePreview");
+    const fileError = document.getElementById("fileError");
+    let parsedQuestions = null;
+    let selectedFile = null;
+
+    fileDrop.addEventListener("click", () => fileInput.click());
+    fileDrop.addEventListener("dragover", e => { e.preventDefault(); fileDrop.classList.add("drag-over"); });
+    fileDrop.addEventListener("dragleave", () => fileDrop.classList.remove("drag-over"));
+    fileDrop.addEventListener("drop", e => {
+      e.preventDefault(); fileDrop.classList.remove("drag-over");
+      if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener("change", () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+    async function handleFile(file) {
+      fileError.classList.add("hidden");
+      filePreview.classList.add("hidden");
+      filePreview.innerHTML = "<em>Parsing file…</em>";
+      filePreview.classList.remove("hidden");
+      try {
+        parsedQuestions = await parseFile(file);
+        selectedFile = file;
+        const n = parsedQuestions.length;
+        document.getElementById("totalQuestions").max = n;
+        document.getElementById("poolHint").textContent = `${n} question(s) parsed from file.`;
+        filePreview.innerHTML = `<strong>${file.name}</strong> — ${n} question(s) parsed successfully.
+          <br><small>Preview: ${parsedQuestions.slice(0,3).map(q => q.text.slice(0,60) + "…").join(" | ")}</small>`;
+      } catch (e) {
+        parsedQuestions = null; selectedFile = null;
+        filePreview.classList.add("hidden");
+        fileError.textContent = e.message;
+        fileError.classList.remove("hidden");
+      }
+    }
+
+    // Form submit
+    document.getElementById("quizForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideMessages();
+
+      const name = document.getElementById("quizName").value.trim();
+      const answerType = document.getElementById("answerType").value;
+      const totalQ = parseInt(document.getElementById("totalQuestions").value, 10);
+      const passT = parseInt(document.getElementById("passThreshold").value, 10);
+      const stopB = document.getElementById("stopBehaviour").value;
+
+      // Validation
+      if (!isEdit && !parsedQuestions) { showError("Please upload a question file."); return; }
+      if (isNaN(totalQ) || totalQ < 1) { showError("Total questions must be at least 1."); return; }
+      if (isNaN(passT) || passT < 1) { showError("Pass threshold must be at least 1."); return; }
+      if (passT > totalQ) { showError("Pass threshold cannot exceed total questions per session."); return; }
+      const poolSize = parsedQuestions ? parsedQuestions.length : existingQuiz?.questionCount;
+      if (poolSize && totalQ > poolSize) {
+        showError(`Total questions (${totalQ}) exceeds question pool size (${poolSize}).`); return;
+      }
+
+      const saveBtn = document.getElementById("saveBtn");
+      saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+
+      try {
+        let fileUrl = existingQuiz?.sourceFileUrl || "";
+        let fileName = existingQuiz?.sourceFileName || "";
+
+        // Upload file if provided
+        if (selectedFile && parsedQuestions) {
+          const storageRef = ref(storage, `uploads/${editId || "new"}/${selectedFile.name}`);
+          const snap = await uploadBytes(storageRef, selectedFile);
+          fileUrl = await getDownloadURL(snap.ref);
+          fileName = selectedFile.name;
+        }
+
+        const quizData = {
+          name, answerType, totalQuestions: totalQ, passThreshold: passT,
+          stopBehaviour: stopB, sourceFileUrl: fileUrl, sourceFileName: fileName,
+          questionCount: parsedQuestions ? parsedQuestions.length : (existingQuiz?.questionCount || 0),
+          updatedAt: serverTimestamp(),
+        };
+
+        let quizId = editId;
+
+        if (isEdit) {
+          await setDoc(doc(db, "quizzes", editId), { ...quizData, createdAt: existingQuiz.createdAt }, { merge: false });
+          // Replace questions if new file uploaded
+          if (parsedQuestions) {
+            const oldQSnap = await getDocs(collection(db, "quizzes", editId, "questions"));
+            const delBatch = writeBatch(db);
+            oldQSnap.forEach(d => delBatch.delete(d.ref));
+            await delBatch.commit();
+            await writeQuestions(editId, parsedQuestions);
+          }
+        } else {
+          const newRef = await addDoc(collection(db, "quizzes"), { ...quizData, createdAt: serverTimestamp() });
+          quizId = newRef.id;
+          // Re-upload with correct quizId path
+          if (selectedFile) {
+            const storageRef = ref(storage, `uploads/${quizId}/${selectedFile.name}`);
+            const snap = await uploadBytes(storageRef, selectedFile);
+            const url = await getDownloadURL(snap.ref);
+            await setDoc(doc(db, "quizzes", quizId), { sourceFileUrl: url }, { merge: true });
+          }
+          await writeQuestions(quizId, parsedQuestions);
+        }
+
+        document.getElementById("globalSuccess").textContent = "Quiz saved successfully!";
+        document.getElementById("globalSuccess").classList.remove("hidden");
+        setTimeout(() => { window.location.href = "/admin/index.html"; }, 1000);
+      } catch (err) {
+        showError("Save failed: " + err.message);
+        saveBtn.disabled = false; saveBtn.textContent = "Save Quiz";
+      }
+    });
+
+    async function writeQuestions(quizId, questions) {
+      const BATCH_SIZE = 400;
+      for (let i = 0; i < questions.length; i += BATCH_SIZE) {
+        const batch = writeBatch(db);
+        questions.slice(i, i + BATCH_SIZE).forEach(q => {
+          const ref = doc(collection(db, "quizzes", quizId, "questions"));
+          batch.set(ref, q);
+        });
+        await batch.commit();
+      }
+    }
+
+    function showError(msg) {
+      const el = document.getElementById("globalError");
+      el.textContent = msg; el.classList.remove("hidden");
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    function hideMessages() {
+      document.getElementById("globalError").classList.add("hidden");
+      document.getElementById("globalSuccess").classList.add("hidden");
+    }
+  </script>
+</body>
+</html>

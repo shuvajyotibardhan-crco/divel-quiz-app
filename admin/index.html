@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard — Divel Quiz</title>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <header class="page-header">
+    <div class="container">
+      <h1>Divel Quiz — Admin</h1>
+      <div class="flex gap-2">
+        <a href="/admin/quiz-form.html" class="btn btn-primary btn-sm">+ New Quiz</a>
+        <button id="logoutBtn" class="btn btn-ghost btn-sm">Log Out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2 class="page-title">Quizzes</h2>
+    <div id="errorMsg" class="alert alert-error hidden"></div>
+    <div id="loading" class="text-muted">Loading quizzes…</div>
+
+    <div class="card" id="tableCard" style="display:none">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Questions (pool)</th>
+              <th>Per session</th>
+              <th>Pass threshold</th>
+              <th>Stop mode</th>
+              <th>Answer type</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="quizTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="emptyState" class="empty-state hidden">
+      <p>No quizzes yet. <a href="/admin/quiz-form.html">Create one.</a></p>
+    </div>
+  </main>
+
+  <script type="module">
+    import { auth, db } from "../js/firebase.js";
+    import { requireAuth } from "../js/auth-guard.js";
+    import {
+      collection, getDocs, deleteDoc, doc, writeBatch, query, orderBy
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+    await requireAuth();
+
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "/admin/login.html";
+    });
+
+    const tbody = document.getElementById("quizTableBody");
+    const tableCard = document.getElementById("tableCard");
+    const emptyState = document.getElementById("emptyState");
+    const loading = document.getElementById("loading");
+    const errorMsg = document.getElementById("errorMsg");
+
+    async function loadQuizzes() {
+      try {
+        const snap = await getDocs(query(collection(db, "quizzes"), orderBy("name")));
+        loading.style.display = "none";
+        if (snap.empty) { emptyState.classList.remove("hidden"); return; }
+        tableCard.style.display = "";
+        tbody.innerHTML = "";
+        snap.forEach(d => renderRow(d.id, d.data()));
+      } catch (e) {
+        loading.style.display = "none";
+        errorMsg.textContent = "Failed to load quizzes: " + e.message;
+        errorMsg.classList.remove("hidden");
+      }
+    }
+
+    function renderRow(id, q) {
+      const stopLabel = q.stopBehaviour === "stop-on-outcome" ? "Stop on outcome" : "Run to end";
+      const typeLabel = { single: "Single", multi: "Multi-select", mixed: "Mixed" }[q.answerType] || q.answerType;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><strong>${escHtml(q.name)}</strong></td>
+        <td>${q.questionCount ?? "?"}</td>
+        <td>${q.totalQuestions}</td>
+        <td>${q.passThreshold}</td>
+        <td>${stopLabel}</td>
+        <td>${typeLabel}</td>
+        <td>
+          <div class="actions">
+            <a href="/admin/quiz-form.html?id=${id}" class="btn btn-ghost btn-sm">Edit</a>
+            <button class="btn btn-danger btn-sm" data-id="${id}" data-name="${escHtml(q.name)}">Delete</button>
+          </div>
+        </td>`;
+      tbody.appendChild(tr);
+    }
+
+    tbody.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-id]");
+      if (!btn) return;
+      const { id, name } = btn.dataset;
+      if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+      btn.disabled = true;
+      try {
+        // Delete all questions in subcollection first
+        const qSnap = await getDocs(collection(db, "quizzes", id, "questions"));
+        const batch = writeBatch(db);
+        qSnap.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+        await deleteDoc(doc(db, "quizzes", id));
+        btn.closest("tr").remove();
+        const remaining = tbody.querySelectorAll("tr").length;
+        if (!remaining) { tableCard.style.display = "none"; emptyState.classList.remove("hidden"); }
+      } catch (e) {
+        errorMsg.textContent = "Delete failed: " + e.message;
+        errorMsg.classList.remove("hidden");
+        btn.disabled = false;
+      }
+    });
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    }
+
+    loadQuizzes();
+  </script>
+</body>
+</html>

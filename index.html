@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Divel Quiz</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="page-header">
+    <div class="container">
+      <h1>Divel Quiz</h1>
+      <a href="/admin/login.html" class="btn btn-ghost btn-sm">Admin</a>
+    </div>
+  </header>
+
+  <main class="container" style="padding-bottom:3rem">
+    <h2 class="page-title">Available Quizzes</h2>
+    <div id="loading" class="text-muted">Loading quizzes…</div>
+    <div id="errorMsg" class="alert alert-error hidden"></div>
+    <div id="cardGrid" class="card-grid" style="display:none"></div>
+    <div id="emptyState" class="empty-state hidden">
+      <p>No quizzes available yet.</p>
+    </div>
+  </main>
+
+  <script type="module">
+    import { db } from "./js/firebase.js";
+    import { collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    const loading = document.getElementById("loading");
+    const errorMsg = document.getElementById("errorMsg");
+    const cardGrid = document.getElementById("cardGrid");
+    const emptyState = document.getElementById("emptyState");
+
+    try {
+      const snap = await getDocs(query(collection(db, "quizzes"), orderBy("name")));
+      loading.style.display = "none";
+
+      if (snap.empty) {
+        emptyState.classList.remove("hidden");
+      } else {
+        cardGrid.style.display = "";
+        snap.forEach(d => cardGrid.appendChild(buildCard(d.id, d.data())));
+      }
+    } catch (e) {
+      loading.style.display = "none";
+      errorMsg.textContent = "Failed to load quizzes. Please try again.";
+      errorMsg.classList.remove("hidden");
+    }
+
+    function buildCard(id, q) {
+      const stopLabel = q.stopBehaviour === "stop-on-outcome" ? "Stop on outcome" : "Run to end";
+      const a = document.createElement("a");
+      a.href = `/quiz.html?id=${id}`;
+      a.className = "card quiz-card";
+      a.innerHTML = `
+        <h2>${escHtml(q.name)}</h2>
+        <p class="meta">${q.totalQuestions} questions &nbsp;·&nbsp; Pass: ${q.passThreshold} correct &nbsp;·&nbsp; ${stopLabel}</p>`;
+      return a;
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+  </script>
+</body>
+</html>

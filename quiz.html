@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quiz — Divel Quiz</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="page-header">
+    <div class="container">
+      <h1 id="quizTitle">Loading…</h1>
+      <a href="/" class="btn btn-ghost btn-sm">← All Quizzes</a>
+    </div>
+  </header>
+
+  <div class="quiz-wrap">
+    <!-- Loading / error -->
+    <div id="loadingMsg" class="text-muted">Loading quiz…</div>
+    <div id="errorMsg" class="alert alert-error hidden"></div>
+
+    <!-- Quiz screen -->
+    <div id="quizScreen" class="hidden">
+      <p class="progress-label" id="progressLabel"></p>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progressBar" style="width:0%"></div>
+      </div>
+
+      <div class="card" style="margin-bottom:1rem">
+        <p class="question-text" id="questionText"></p>
+        <div id="answersContainer"></div>
+        <div id="feedbackMsg" class="feedback-msg hidden"></div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end">
+        <button id="submitBtn" class="btn btn-primary" disabled>Submit Answer</button>
+        <button id="nextBtn" class="btn btn-primary hidden">Next</button>
+      </div>
+    </div>
+
+    <!-- Result screen -->
+    <div id="resultScreen" class="hidden">
+      <div class="card result-card">
+        <div class="outcome" id="outcomeLabel"></div>
+        <p class="score" id="scoreLabel"></p>
+        <button id="retakeBtn" class="btn btn-primary">Take Again</button>
+        <a href="/" class="btn btn-ghost" style="margin-left:0.5rem">All Quizzes</a>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { db } from "./js/firebase.js";
+    import { selectQuestions, isCorrect, evaluateOutcome, calculateFinalOutcome } from "./js/quiz-engine.js";
+    import { collection, doc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    const params = new URLSearchParams(location.search);
+    const quizId = params.get("id");
+
+    const loadingMsg   = document.getElementById("loadingMsg");
+    const errorMsg     = document.getElementById("errorMsg");
+    const quizScreen   = document.getElementById("quizScreen");
+    const resultScreen = document.getElementById("resultScreen");
+    const quizTitle    = document.getElementById("quizTitle");
+
+    if (!quizId) { showError("No quiz specified."); loadingMsg.style.display = "none"; }
+
+    // ── Load quiz ────────────────────────────────────────────────────────────
+    let quiz, questions, session;
+
+    try {
+      const [quizSnap, qSnap] = await Promise.all([
+        getDoc(doc(db, "quizzes", quizId)),
+        getDocs(collection(db, "quizzes", quizId, "questions")),
+      ]);
+
+      if (!quizSnap.exists()) { showError("Quiz not found."); loadingMsg.style.display = "none"; return; }
+
+      quiz = quizSnap.data();
+      const pool = qSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      questions = selectQuestions(pool, quiz.totalQuestions);
+
+      quizTitle.textContent = quiz.name;
+      document.title = quiz.name + " — Divel Quiz";
+
+      session = { index: 0, correct: 0, incorrect: 0 };
+      loadingMsg.style.display = "none";
+      quizScreen.classList.remove("hidden");
+      renderQuestion();
+    } catch (e) {
+      loadingMsg.style.display = "none";
+      showError("Failed to load quiz: " + e.message);
+    }
+
+    // ── Render question ───────────────────────────────────────────────────────
+    function renderQuestion() {
+      const q = questions[session.index];
+      const total = questions.length;
+      const num = session.index + 1;
+      const pct = Math.round((num / total) * 100);
+
+      document.getElementById("progressLabel").textContent = `Question ${num} of ${total}`;
+      document.getElementById("progressBar").style.width = pct + "%";
+      document.getElementById("questionText").textContent = q.text;
+
+      const container = document.getElementById("answersContainer");
+      container.innerHTML = "";
+
+      // Use quiz-level answerType, overridden by per-question type in mixed mode
+      const type = quiz.answerType === "mixed" ? q.type : quiz.answerType;
+      const inputType = type === "multi" ? "checkbox" : "radio";
+
+      q.answers.forEach(ans => {
+        const label = document.createElement("label");
+        label.className = "answer-option";
+        label.dataset.id = ans.id;
+        label.innerHTML = `<input type="${inputType}" name="answer" value="${ans.id}"> ${escHtml(ans.text)}`;
+        container.appendChild(label);
+      });
+
+      document.getElementById("feedbackMsg").classList.add("hidden");
+      document.getElementById("submitBtn").disabled = true;
+      document.getElementById("submitBtn").classList.remove("hidden");
+      document.getElementById("nextBtn").classList.add("hidden");
+
+      container.addEventListener("change", () => {
+        const hasSelection = container.querySelector("input:checked");
+        document.getElementById("submitBtn").disabled = !hasSelection;
+      });
+    }
+
+    // ── Submit answer ─────────────────────────────────────────────────────────
+    document.getElementById("submitBtn").addEventListener("click", () => {
+      const q = questions[session.index];
+      const selected = [...document.querySelectorAll("input[name='answer']:checked")].map(i => i.value);
+      if (!selected.length) return;
+
+      const correct = isCorrect(q, selected);
+      if (correct) session.correct++; else session.incorrect++;
+
+      // Style options
+      document.querySelectorAll(".answer-option").forEach(label => {
+        const id = label.dataset.id;
+        label.querySelector("input").disabled = true;
+        if (q.correctIds.includes(id)) label.classList.add("correct");
+        else if (selected.includes(id)) label.classList.add("incorrect");
+      });
+
+      // Feedback
+      const feedback = document.getElementById("feedbackMsg");
+      feedback.textContent = correct ? "Correct!" : "Incorrect. The correct answer is highlighted above.";
+      feedback.className = "feedback-msg " + (correct ? "correct" : "incorrect");
+      feedback.classList.remove("hidden");
+
+      document.getElementById("submitBtn").classList.add("hidden");
+
+      // Check stop-on-outcome
+      if (quiz.stopBehaviour === "stop-on-outcome") {
+        const outcome = evaluateOutcome(session.correct, session.incorrect, quiz.totalQuestions, quiz.passThreshold);
+        if (outcome) {
+          setTimeout(() => showResult(outcome), 900);
+          return;
+        }
+      }
+
+      // Check if last question (run-to-end or stop-on-outcome mid-run)
+      if (session.index >= questions.length - 1) {
+        const outcome = calculateFinalOutcome(session.correct, quiz.passThreshold);
+        setTimeout(() => showResult(outcome), 900);
+        return;
+      }
+
+      document.getElementById("nextBtn").classList.remove("hidden");
+    });
+
+    document.getElementById("nextBtn").addEventListener("click", () => {
+      session.index++;
+      renderQuestion();
+    });
+
+    // ── Result screen ─────────────────────────────────────────────────────────
+    function showResult(outcome) {
+      quizScreen.classList.add("hidden");
+      resultScreen.classList.remove("hidden");
+
+      const outcomeLabel = document.getElementById("outcomeLabel");
+      outcomeLabel.textContent = outcome === "pass" ? "Passed!" : "Failed";
+      outcomeLabel.className = "outcome " + outcome;
+
+      document.getElementById("scoreLabel").textContent =
+        `${session.correct} correct out of ${session.index + 1} question(s) answered`;
+    }
+
+    document.getElementById("retakeBtn").addEventListener("click", () => {
+      location.reload();
+    });
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.classList.remove("hidden");
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+  </script>
+</body>
+</html>

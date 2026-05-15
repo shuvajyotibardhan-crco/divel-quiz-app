@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Login — Divel Quiz</title>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="card auth-card">
+      <h1>Divel Quiz<br><span style="font-size:1rem;font-weight:400;color:var(--muted)">Admin Login</span></h1>
+
+      <div id="errorMsg" class="alert alert-error hidden"></div>
+
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" required autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary" id="submitBtn" style="width:100%">
+          Log In
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script type="module">
+    import { auth } from "../js/firebase.js";
+    import {
+      signInWithEmailAndPassword,
+      onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+    // Already logged in → go straight to dashboard
+    onAuthStateChanged(auth, (user) => {
+      if (user) window.location.href = "/admin/index.html";
+    });
+
+    const form = document.getElementById("loginForm");
+    const errorMsg = document.getElementById("errorMsg");
+    const submitBtn = document.getElementById("submitBtn");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorMsg.classList.add("hidden");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Logging in…";
+
+      try {
+        await signInWithEmailAndPassword(
+          auth,
+          document.getElementById("email").value.trim(),
+          document.getElementById("password").value
+        );
+        window.location.href = "/admin/index.html";
+      } catch {
+        errorMsg.textContent = "Invalid email or password.";
+        errorMsg.classList.remove("hidden");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Log In";
+      }
+    });
+  </script>
+</body>
+</html>
