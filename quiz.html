@@ -68,29 +68,36 @@
     // ── Load quiz ────────────────────────────────────────────────────────────
     let quiz, questions, session;
 
-    try {
-      const [quizSnap, qSnap] = await Promise.all([
-        getDoc(doc(db, "quizzes", quizId)),
-        getDocs(collection(db, "quizzes", quizId, "questions")),
-      ]);
+    (async () => {
+      if (!quizId) return;
+      try {
+        const [quizSnap, qSnap] = await Promise.all([
+          getDoc(doc(db, "quizzes", quizId)),
+          getDocs(collection(db, "quizzes", quizId, "questions")),
+        ]);
 
-      if (!quizSnap.exists()) { showError("Quiz not found."); loadingMsg.style.display = "none"; return; }
+        if (!quizSnap.exists()) {
+          showError("Quiz not found.");
+          loadingMsg.style.display = "none";
+          return;
+        }
 
-      quiz = quizSnap.data();
-      const pool = qSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      questions = selectQuestions(pool, quiz.totalQuestions);
+        quiz = quizSnap.data();
+        const pool = qSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        questions = selectQuestions(pool, quiz.totalQuestions);
 
-      quizTitle.textContent = quiz.name;
-      document.title = quiz.name + " — Divel Quiz";
+        quizTitle.textContent = quiz.name;
+        document.title = quiz.name + " — Divel Quiz";
 
-      session = { index: 0, correct: 0, incorrect: 0 };
-      loadingMsg.style.display = "none";
-      quizScreen.classList.remove("hidden");
-      renderQuestion();
-    } catch (e) {
-      loadingMsg.style.display = "none";
-      showError("Failed to load quiz: " + e.message);
-    }
+        session = { index: 0, correct: 0, incorrect: 0 };
+        loadingMsg.style.display = "none";
+        quizScreen.classList.remove("hidden");
+        renderQuestion();
+      } catch (e) {
+        loadingMsg.style.display = "none";
+        showError("Failed to load quiz: " + e.message);
+      }
+    })();
 
     // ── Render question ───────────────────────────────────────────────────────
     function renderQuestion() {

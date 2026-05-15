@@ -82,16 +82,18 @@
   </main>
 
   <script type="module">
-    import { auth, db, storage } from "../js/firebase.js";
+    import { app, db } from "../js/firebase.js";
     import { requireAuth } from "../js/auth-guard.js";
     import { parseFile } from "../js/file-parser.js";
     import {
       collection, doc, getDoc, setDoc, addDoc, getDocs,
-      writeBatch, serverTimestamp, deleteDoc
+      writeBatch, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
     import {
-      ref, uploadBytes, getDownloadURL
+      getStorage, ref, uploadBytes, getDownloadURL
     } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+
+    const storage = getStorage(app);
 
     await requireAuth();
 
