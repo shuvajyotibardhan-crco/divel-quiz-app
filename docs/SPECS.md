@@ -242,6 +242,7 @@ Divel Quiz App/
 ├── .env.example
 ├── CLAUDE.md
 ├── progress.md
+├── package.json               # npm config for seed script (firebase-admin, papaparse deps)
 ├── firebase.json              # Firebase Hosting config
 ├── firestore.rules            # Firestore security rules
 ├── storage.rules              # Firebase Storage security rules
