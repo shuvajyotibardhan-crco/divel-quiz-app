@@ -1,0 +1,28 @@
+name: Deploy to Firebase Hosting
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: divel-quiz
+          channelId: live
+
+      - name: Deploy Firestore rules
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /tmp/sa.json
+          npx firebase-tools@latest deploy --only firestore:rules,storage --project divel-quiz --token "$(npx firebase-tools@latest login:ci --no-localhost 2>/dev/null || true)" --service-account /tmp/sa.json --force || \
+          npx firebase-tools@latest deploy --only firestore:rules,storage --project divel-quiz --force
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/sa.json
